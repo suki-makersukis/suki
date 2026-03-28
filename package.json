@@ -5,33 +5,19 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "node index.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.10",
     "@hapi/boom": "^10.0.1",
     "pino": "^9.6.0",
-    "crypto": "^1.0.1",
-    "qrcode-terminal": "^0.12.0"
+    "crypto": "^1.0.1"
   },
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=9.0.0"
   },
-  "keywords": [
-    "whatsapp-bot",
-    "discord-bot",
-    "game-bot",
-    "judol-bot",
-    "duel-bot",
-    "multi-game",
-    "economy-bot"
-  ],
+  "keywords": ["whatsapp-bot", "game-bot", "judol-bot", "duel-bot"],
   "author": "DUEL RXV TEAM",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/yourusername/duel-rxv-bot"
-  }
+  "license": "MIT"
 }
