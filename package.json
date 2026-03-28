@@ -1,0 +1,17 @@
+{
+  "name": "duel-rxv-bot",
+  "version": "1.0.0",
+  "description": "DUEL RXV TEAMRXVVX - WhatsApp Bot Lengkap (PVP + PVH + JUDOL)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.7",
+    "@hapi/boom": "^10.0.1",
+    "pino": "^8.21.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
