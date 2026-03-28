@@ -1,11 +1,10 @@
 {
   "name": "duel-rxv-bot",
   "version": "2.0.0",
-  "description": "DUEL RXV TEAMRXVVX - WhatsApp Bot with Multi Owner, Seller & Complete Games",
+  "description": "DUEL RXV TEAMRXVVX - WhatsApp Bot",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node index.js"
+    "start": "node index.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.10",
@@ -14,10 +13,6 @@
     "crypto": "^1.0.1"
   },
   "engines": {
-    "node": ">=20.0.0",
-    "npm": ">=9.0.0"
-  },
-  "keywords": ["whatsapp-bot", "game-bot", "judol-bot", "duel-bot"],
-  "author": "DUEL RXV TEAM",
-  "license": "MIT"
+    "node": ">=20.0.0"
+  }
 }
