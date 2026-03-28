@@ -1,15 +1,15 @@
 // ==========================================
-// GAME DUEL LUCKY MAFIAPS
-// WhatsApp Bot - Railway Deployment
+// GAME DUEL LUCKY MAFIAPS - ES MODULE VERSION
 // ==========================================
 
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeInMemoryStore } = require('@whiskeysockets/baileys');
-const P = require('pino');
-const fs = require('fs');
-const path = require('path');
-const moment = require('moment-timezone');
+import { default as makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
+import pkg from 'pino';
+const P = pkg;
+import fs from 'fs';
+import path from 'path';
+import moment from 'moment-timezone';
+import qrcode from 'qrcode-terminal';
 
-// Set timezone ke WIB
 moment.tz.setDefault('Asia/Jakarta');
 
 // ==========================================
@@ -32,8 +32,7 @@ let db = {
     tickets: {},
     referrals: {},
     withdrawRequests: {},
-    gameHistory: {},
-    sessions: {}
+    gameHistory: {}
 };
 
 function loadDB() {
@@ -63,7 +62,7 @@ loadDB();
 // ==========================================
 const CONFIG = {
     BOT_NAME: 'Duel Lucky MafiaPS',
-    BOT_NUMBER: '', // Akan diisi otomatis
+    BOT_NUMBER: '',
     VERSION: '1.0.0',
     DEPOSIT_NUMBER: '+62 831-7349-5612',
     DEPOSIT_EWALLETS: {
@@ -75,14 +74,12 @@ const CONFIG = {
     MIN_BET: 100,
     MAX_BET: 10000000,
     TAX_RATE: 0.05,
-    HOST_FEE: 0.10,
     DAILY_BONUS: 5000,
     WITHDRAW_MIN: 50000,
-    PREFIX: '!', // Prefix command
+    PREFIX: '!',
     SESSION_DIR: './sessions'
 };
 
-// Buat folder session jika belum ada
 if (!fs.existsSync(CONFIG.SESSION_DIR)) {
     fs.mkdirSync(CONFIG.SESSION_DIR, { recursive: true });
 }
@@ -162,8 +159,10 @@ function getUser(userId) {
             stats: {
                 wins: 0,
                 losses: 0,
-                totalBet: 0,
-                totalWin: 0,
+                totalBetBGL: 0,
+                totalBetMGL: 0,
+                totalWinBGL: 0,
+                totalWinMGL: 0,
                 gamesPlayed: 0,
                 streak: 0
             },
@@ -187,7 +186,11 @@ function deductBalance(userId, currency, amount) {
     const user = getUser(userId);
     if (user.balance[currency] >= amount) {
         user.balance[currency] -= amount;
-        user.stats.totalBet += amount;
+        if (currency === 'bgl') {
+            user.stats.totalBetBGL += amount;
+        } else {
+            user.stats.totalBetMGL += amount;
+        }
         saveDB();
         return true;
     }
@@ -197,7 +200,11 @@ function deductBalance(userId, currency, amount) {
 function addBalance(userId, currency, amount, reason = '') {
     const user = getUser(userId);
     user.balance[currency] += amount;
-    user.stats.totalWin += amount;
+    if (currency === 'bgl') {
+        user.stats.totalWinBGL += amount;
+    } else {
+        user.stats.totalWinMGL += amount;
+    }
     
     if (reason === 'daily') {
         user.lastDaily = Date.now();
@@ -207,7 +214,7 @@ function addBalance(userId, currency, amount, reason = '') {
     return true;
 }
 
-function transferBalance(fromId, toId, currency, amount, note = '') {
+function transferBalance(fromId, toId, currency, amount) {
     if (checkBalance(fromId, currency, amount)) {
         deductBalance(fromId, currency, amount);
         addBalance(toId, currency, amount);
@@ -217,10 +224,27 @@ function transferBalance(fromId, toId, currency, amount, note = '') {
 }
 
 // ==========================================
-// GAME MECHANICS
+// PARSE BET (Support BGL & MGL)
 // ==========================================
 
-// 1. REME Game
+function parseBet(betString) {
+    const match = betString.match(/^(\d+)(bgl|mgl)$/i);
+    if (!match) return null;
+    
+    return {
+        amount: parseInt(match[1]),
+        currency: match[2].toLowerCase()
+    };
+}
+
+function formatBetDisplay(amount, currency) {
+    return `${formatMoney(amount)} ${currency.toUpperCase()}`;
+}
+
+// ==========================================
+// GAME MECHANICS (Support Multi Currency)
+// ==========================================
+
 function gameReme(betAmount, choice) {
     const validChoices = ['b1', 'b3', 'b5', 'b7'];
     if (!validChoices.includes(choice)) return null;
@@ -237,11 +261,10 @@ function gameReme(betAmount, choice) {
         randomNumber,
         targetNumber,
         multiplier,
-        message: `🎲 *GAME REME*\n━━━━━━━━━━━━━━\n🎯 Pilihan: ${choice}\n🎲 Angka keluar: ${randomNumber}\n━━━━━━━━━━━━━━\n${isWin ? `✅ *SELAMAT!*\n💰 Menang: ${formatMoney(winAmount)} BGL` : '❌ *KALAH!*'}`
+        message: `🎲 *GAME REME*\n━━━━━━━━━━━━━━\n🎯 Pilihan: ${choice}\n🎲 Angka keluar: ${randomNumber}\n━━━━━━━━━━━━━━\n${isWin ? `✅ *SELAMAT!*\n💰 Menang: ${formatMoney(winAmount)}` : '❌ *KALAH!*'}`
     };
 }
 
-// 2. LEME Game
 function gameLeme(betAmount, choice) {
     const validChoices = ['b1', 'b3', 'b5', 'b7', 'b9'];
     if (!validChoices.includes(choice)) return null;
@@ -258,11 +281,10 @@ function gameLeme(betAmount, choice) {
         luckyNumber,
         targetNum,
         multiplier,
-        message: `🍀 *GAME LEME*\n━━━━━━━━━━━━━━\n🍀 Pilihan: ${choice}\n🎲 Angka keluar: ${luckyNumber}\n━━━━━━━━━━━━━━\n${isWin ? `✅ *SELAMAT!*\n💰 Menang: ${formatMoney(winAmount)} BGL` : '❌ *KALAH!*'}`
+        message: `🍀 *GAME LEME*\n━━━━━━━━━━━━━━\n🍀 Pilihan: ${choice}\n🎲 Angka keluar: ${luckyNumber}\n━━━━━━━━━━━━━━\n${isWin ? `✅ *SELAMAT!*\n💰 Menang: ${formatMoney(winAmount)}` : '❌ *KALAH!*'}`
     };
 }
 
-// 3. QEME Game
 function gameQeme(betAmount, choice) {
     const validChoices = ['b1', 'b3', 'b5', 'b7', 'b9'];
     if (!validChoices.includes(choice)) return null;
@@ -281,11 +303,10 @@ function gameQeme(betAmount, choice) {
         total,
         target,
         multiplier,
-        message: `🃏 *GAME QEME*\n━━━━━━━━━━━━━━\n🃏 Kartu: ${cards[0]} | ${cards[1]}\n🎯 Nilai: ${total}\n🎯 Target: ${choice}\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)} BGL!` : '❌ KALAH!'}`
+        message: `🃏 *GAME QEME*\n━━━━━━━━━━━━━━\n🃏 Kartu: ${cards[0]} | ${cards[1]}\n🎯 Nilai: ${total}\n🎯 Target: ${choice}\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)}!` : '❌ KALAH!'}`
     };
 }
 
-// 4. LEWA Game
 function gameLewa(betAmount, choice) {
     const validChoices = ['b1', 'b3', 'b5', 'b7', 'b9'];
     if (!validChoices.includes(choice)) return null;
@@ -306,11 +327,10 @@ function gameLewa(betAmount, choice) {
         lastDigit,
         target,
         multiplier,
-        message: `🎴 *GAME LEWA*\n━━━━━━━━━━━━━━\n🎴 Kartu: ${cards.join(' | ')}\n📊 Total: ${sum} | Akhir: ${lastDigit}\n🎯 Target: ${choice}\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)} BGL!` : '❌ KALAH!'}`
+        message: `🎴 *GAME LEWA*\n━━━━━━━━━━━━━━\n🎴 Kartu: ${cards.join(' | ')}\n📊 Total: ${sum} | Akhir: ${lastDigit}\n🎯 Target: ${choice}\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)}!` : '❌ KALAH!'}`
     };
 }
 
-// 5. CSN Game
 function gameCsn(betAmount, choice) {
     const validChoices = ['b1', 'b3', 'b5', 'b7'];
     if (!validChoices.includes(choice)) return null;
@@ -330,11 +350,10 @@ function gameCsn(betAmount, choice) {
         sum,
         lastDigit,
         target,
-        message: `🎴 *GAME CSN*\n━━━━━━━━━━━━━━\n🎴 Kartu: ${cards.join(', ')}\nTotal: ${sum} | Akhir: ${lastDigit}\n${isWin ? `✅ MENANG ${formatMoney(winAmount)} BGL!` : '❌ KALAH!'}`
+        message: `🎴 *GAME CSN*\n━━━━━━━━━━━━━━\n🎴 Kartu: ${cards.join(', ')}\nTotal: ${sum} | Akhir: ${lastDigit}\n${isWin ? `✅ MENANG ${formatMoney(winAmount)}!` : '❌ KALAH!'}`
     };
 }
 
-// 6. QQ Game
 function gameQq(betAmount, choice) {
     const validChoices = ['b1', 'b3', 'b5', 'b7'];
     if (!validChoices.includes(choice)) return null;
@@ -352,11 +371,10 @@ function gameQq(betAmount, choice) {
         cards,
         total,
         target,
-        message: `🃏 *GAME QQ*\n━━━━━━━━━━━━━━\nKartu: ${cards.join(', ')} | Nilai: ${total}\n${isWin ? `✅ MENANG ${formatMoney(winAmount)} BGL!` : '❌ KALAH!'}`
+        message: `🃏 *GAME QQ*\n━━━━━━━━━━━━━━\nKartu: ${cards.join(', ')} | Nilai: ${total}\n${isWin ? `✅ MENANG ${formatMoney(winAmount)}!` : '❌ KALAH!'}`
     };
 }
 
-// 7. RPS Game
 function gameRps(betAmount, choice) {
     const choices = ['batu', 'kertas', 'gunting'];
     const botChoice = choices[randomInt(0, 2)];
@@ -373,11 +391,10 @@ function gameRps(betAmount, choice) {
         winAmount,
         userChoice: choice,
         botChoice,
-        message: `🖐️ *GAME RPS*\n━━━━━━━━━━━━━━\n👤 Anda: ${choice}\n🤖 Bot: ${botChoice}\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)} BGL!` : '❌ KALAH!'}`
+        message: `🖐️ *GAME RPS*\n━━━━━━━━━━━━━━\n👤 Anda: ${choice}\n🤖 Bot: ${botChoice}\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)}!` : '❌ KALAH!'}`
     };
 }
 
-// 8. Dadu Game
 function gameDadu(betAmount, choice) {
     const validChoices = ['b1', 'b3', 'b5', 'b7'];
     if (!validChoices.includes(choice)) return null;
@@ -393,11 +410,10 @@ function gameDadu(betAmount, choice) {
         winAmount,
         dice,
         target,
-        message: `🎲 *GAME DADU*\n━━━━━━━━━━━━━━\n🎲 Dadu: ${dice}\n🎯 Target: ${choice}\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)} BGL!` : '❌ KALAH!'}`
+        message: `🎲 *GAME DADU*\n━━━━━━━━━━━━━━\n🎲 Dadu: ${dice}\n🎯 Target: ${choice}\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)}!` : '❌ KALAH!'}`
     };
 }
 
-// 9. KB Game
 function gameKb(betAmount, choice) {
     const dice = randomInt(1, 6);
     const isKecil = dice <= 3;
@@ -409,11 +425,10 @@ function gameKb(betAmount, choice) {
         winAmount,
         dice,
         choice,
-        message: `🎲 *GAME KB*\n━━━━━━━━━━━━━━\n🎲 Dadu: ${dice} (${dice <= 3 ? 'KECIL' : 'BESAR'})\n🎯 Pilihan: ${choice.toUpperCase()}\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)} BGL!` : '❌ KALAH!'}`
+        message: `🎲 *GAME KB*\n━━━━━━━━━━━━━━\n🎲 Dadu: ${dice} (${dice <= 3 ? 'KECIL' : 'BESAR'})\n🎯 Pilihan: ${choice.toUpperCase()}\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)}!` : '❌ KALAH!'}`
     };
 }
 
-// 10. Coin Game
 function gameCoin(betAmount, choice) {
     const result = randomInt(1, 2) === 1 ? 'head' : 'tail';
     const isWin = choice === result;
@@ -424,11 +439,10 @@ function gameCoin(betAmount, choice) {
         winAmount,
         result,
         choice,
-        message: `🪙 *GAME COIN*\n━━━━━━━━━━━━━━\n🪙 Hasil: ${result === 'head' ? 'KEPALA' : 'EKOR'}\n🎯 Pilihan: ${choice.toUpperCase()}\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)} BGL!` : '❌ KALAH!'}`
+        message: `🪙 *GAME COIN*\n━━━━━━━━━━━━━━\n🪙 Hasil: ${result === 'head' ? 'KEPALA' : 'EKOR'}\n🎯 Pilihan: ${choice.toUpperCase()}\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)}!` : '❌ KALAH!'}`
     };
 }
 
-// 11. LMH Game
 function gameLmh(betAmount, choice) {
     const number = randomInt(1, 100);
     let isWin = false;
@@ -445,11 +459,10 @@ function gameLmh(betAmount, choice) {
         winAmount,
         number,
         choice,
-        message: `🎯 *GAME LMH*\n━━━━━━━━━━━━━━\n🎯 Angka: ${number}\n🎯 Range: ${choice === 'low' ? '1-33' : choice === 'mid' ? '34-66' : '67-100'}\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)} BGL!` : '❌ KALAH!'}`
+        message: `🎯 *GAME LMH*\n━━━━━━━━━━━━━━\n🎯 Angka: ${number}\n🎯 Range: ${choice === 'low' ? '1-33' : choice === 'mid' ? '34-66' : '67-100'}\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)}!` : '❌ KALAH!'}`
     };
 }
 
-// 12. NEME Game
 function gameNeme(betAmount) {
     const number = randomInt(1, 100);
     const isWin = number % 2 === 0;
@@ -459,12 +472,12 @@ function gameNeme(betAmount) {
         isWin,
         winAmount,
         number,
-        message: `🎯 *GAME NEME*\n━━━━━━━━━━━━━━\n🎯 Angka: ${number} (${number % 2 === 0 ? 'GENAP' : 'GANJIL'})\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)} BGL!` : '❌ KALAH!'}`
+        message: `🎯 *GAME NEME*\n━━━━━━━━━━━━━━\n🎯 Angka: ${number} (${number % 2 === 0 ? 'GENAP' : 'GANJIL'})\n━━━━━━━━━━━━━━\n${isWin ? `✅ MENANG ${formatMoney(winAmount)}!` : '❌ KALAH!'}`
     };
 }
 
 // ==========================================
-// PVP DUEL SYSTEM
+// PVP DUEL SYSTEM (Support BGL & MGL)
 // ==========================================
 
 function createDuel(player1Id, player2Id, currency, betAmount, gameType) {
@@ -536,7 +549,7 @@ function startDuel(duelId) {
         saveDB();
         return { 
             isTie: true,
-            message: `🤝 *DUEL SERI!*\n━━━━━━━━━━━━━━\n💰 Taruhan dikembalikan!\n\n🎲 Hasil Player 1:\n${result1.message}\n\n🎲 Hasil Player 2:\n${result2.message}`
+            message: `🤝 *DUEL SERI!*\n━━━━━━━━━━━━━━\n💰 Taruhan ${formatBetDisplay(duel.betAmount, duel.currency)} dikembalikan!\n\n🎲 Hasil Player 1:\n${result1.message}\n\n🎲 Hasil Player 2:\n${result2.message}`
         };
     }
     
@@ -563,7 +576,7 @@ function startDuel(duelId) {
         tax,
         result1,
         result2,
-        message: `🏆 *DUEL ${duel.gameType.toUpperCase()}* 🏆\n━━━━━━━━━━━━━━\n💰 Taruhan: ${formatMoney(duel.betAmount)} ${duel.currency.toUpperCase()}\n━━━━━━━━━━━━━━\n🎲 HASIL PLAYER 1:\n${result1.message}\n\n🎲 HASIL PLAYER 2:\n${result2.message}\n━━━━━━━━━━━━━━\n🏅 *PEMENANG:* @${winner.split('@')[0]}\n🎁 Hadiah: ${formatMoney(winnerPrize)} ${duel.currency.toUpperCase()}\n💸 Pajak Meja: ${formatMoney(tax)} ${duel.currency.toUpperCase()}\n━━━━━━━━━━━━━━\n✨ *Streak: ${winnerUser.stats.streak}*`
+        message: `🏆 *DUEL ${duel.gameType.toUpperCase()}* 🏆\n━━━━━━━━━━━━━━\n💰 Taruhan: ${formatBetDisplay(duel.betAmount, duel.currency)}\n━━━━━━━━━━━━━━\n🎲 HASIL PLAYER 1:\n${result1.message}\n\n🎲 HASIL PLAYER 2:\n${result2.message}\n━━━━━━━━━━━━━━\n🏅 *PEMENANG:* @${winner.split('@')[0]}\n🎁 Hadiah: ${formatBetDisplay(winnerPrize, duel.currency)}\n💸 Pajak Meja: ${formatBetDisplay(tax, duel.currency)}\n━━━━━━━━━━━━━━\n✨ *Streak: ${winnerUser.stats.streak}*`
     };
 }
 
@@ -589,11 +602,11 @@ function getDepositInfo() {
 
 function createWithdrawTicket(userId, currency, amount) {
     if (amount < CONFIG.WITHDRAW_MIN) {
-        return { success: false, message: `❌ Minimal withdraw ${formatMoney(CONFIG.WITHDRAW_MIN)}` };
+        return { success: false, message: `❌ Minimal withdraw ${formatMoney(CONFIG.WITHDRAW_MIN)} ${currency.toUpperCase()}` };
     }
     
     if (!checkBalance(userId, currency, amount)) {
-        return { success: false, message: `❌ Saldo tidak mencukupi!` };
+        return { success: false, message: `❌ Saldo ${currency.toUpperCase()} tidak mencukupi!` };
     }
     
     const ticketId = `WD_${Date.now()}_${userId.split('@')[0]}`;
@@ -610,7 +623,7 @@ function createWithdrawTicket(userId, currency, amount) {
     return { 
         success: true, 
         ticketId,
-        message: `✅ Ticket withdraw berhasil dibuat!\n🆔 ID: ${ticketId}\n💰 Jumlah: ${formatMoney(amount)} ${currency.toUpperCase()}\n⏳ Menunggu verifikasi admin.`
+        message: `✅ Ticket withdraw berhasil dibuat!\n🆔 ID: ${ticketId}\n💰 Jumlah: ${formatBetDisplay(amount, currency)}\n⏳ Menunggu verifikasi admin.`
     };
 }
 
@@ -627,7 +640,7 @@ function approveWithdraw(ticketId, adminId) {
         saveDB();
         return { 
             success: true, 
-            message: `✅ Withdraw disetujui!\n👤 User: @${ticket.userId.split('@')[0]}\n💰 Jumlah: ${formatMoney(ticket.amount)} ${ticket.currency.toUpperCase()}`
+            message: `✅ Withdraw disetujui!\n👤 User: @${ticket.userId.split('@')[0]}\n💰 Jumlah: ${formatBetDisplay(ticket.amount, ticket.currency)}`
         };
     }
     return { success: false, message: '❌ Saldo user tidak mencukupi!' };
@@ -642,13 +655,13 @@ function ownerAddCoin(userId, currency, amount) {
         return { success: false, message: '❌ Currency hanya bgl atau mgl!' };
     }
     addBalance(userId, currency, amount, 'owner_add');
-    return { success: true, message: `✅ Berhasil menambahkan ${formatMoney(amount)} ${currency.toUpperCase()} ke @${userId.split('@')[0]}` };
+    return { success: true, message: `✅ Berhasil menambahkan ${formatBetDisplay(amount, currency)} ke @${userId.split('@')[0]}` };
 }
 
 function ownerDelCoin(userId, currency, amount) {
     if (checkBalance(userId, currency, amount)) {
         deductBalance(userId, currency, amount);
-        return { success: true, message: `✅ Berhasil menghapus ${formatMoney(amount)} ${currency.toUpperCase()} dari @${userId.split('@')[0]}` };
+        return { success: true, message: `✅ Berhasil menghapus ${formatBetDisplay(amount, currency)} dari @${userId.split('@')[0]}` };
     }
     return { success: false, message: `❌ Saldo @${userId.split('@')[0]} tidak mencukupi!` };
 }
@@ -657,7 +670,7 @@ function ownerSetCoin(userId, currency, amount) {
     const user = getUser(userId);
     user.balance[currency] = amount;
     saveDB();
-    return { success: true, message: `✅ Berhasil mengatur saldo @${userId.split('@')[0]} menjadi ${formatMoney(amount)} ${currency.toUpperCase()}` };
+    return { success: true, message: `✅ Berhasil mengatur saldo @${userId.split('@')[0]} menjadi ${formatBetDisplay(amount, currency)}` };
 }
 
 // ==========================================
@@ -682,36 +695,46 @@ function getMainMenu() {
 │  •🪙 *coin* <bet> <head/tail>
 │  •🎯 *lmh* <bet> <low/mid/high>
 │  •🎯 *neme* <bet>
+│
+│  📝 *Format Bet:* <jumlah>bgl atau <jumlah>mgl
+│  📝 *Contoh:* reme 1000bgl b3
+│  📝 *Contoh:* leme 500mgl b5
+│
 ├──〔 🎮 GAME PVP DUEL 〕
 │  •⚔️ *duel* @tag <game> <bet>
 │  •✅ *accept* - Terima duel
 │  •❌ *reject* - Tolak duel
+│
 ├──〔 💰 ECONOMY SYSTEM 〕
 │  •💵 *cu* — cek uang
-│  •💸 *tf* @tag <jumlah> <bgl/mgl>
+│  •💸 *tf* @tag <jumlah>bgl/mgl
 │  •🥇 *top* — leaderboard
 │  •🏦 *bank* — cek bank
 │  •🏦 *savebank* <jumlah> — simpan
 │  •🏦 *cashout* <jumlah> — tarik
 │  •🎁 *daily* — bonus harian
+│
 ├──〔 💳 DEPOSIT SYSTEM 〕
 │  •💳 *depo* — info deposit
-│  •💳 *wd* <amount> — withdraw
+│  •💳 *wd* <jumlah> <bgl/mgl> — withdraw
+│
 ├──〔 🛠️ADMIN COMMANDS 〕
 │  •👑 *addowner* @tag — tambah owner
 │  •👑 *delowner* @tag — hapus owner
 │  •🛡️ *addseller* @tag — tambah seller
 │  •🛡️ *delseller* @tag — hapus seller
-│  •➕ *addcoin* @tag <amount> <bgl/mgl>
-│  •➖ *delcoin* @tag <amount> <bgl/mgl>
-│  •⚙️ *setcoin* @tag <amount> <bgl/mgl>
+│  •➕ *addcoin* @tag <jumlah> <bgl/mgl>
+│  •➖ *delcoin* @tag <jumlah> <bgl/mgl>
+│  •⚙️ *setcoin* @tag <jumlah> <bgl/mgl>
 │  •✅ *approvewd* <ticket_id>
 │  •📢 *bc* <pesan>
+│
 ├──〔 🛠️TOOLS 〕
 │  •🎲 *dice* — roll dadu
 │  •🪙 *flip* — flip coin
 │  •🃏 *card* — random kartu
 │  •🔰 *how* — cara bermain
+│
 ╰────────────────────────
 © ${CONFIG.BOT_NAME}`;
 }
@@ -719,8 +742,6 @@ function getMainMenu() {
 // ==========================================
 // WHATSAPP BOT CONNECTION
 // ==========================================
-
-const store = makeInMemoryStore({ logger: P().child({ level: 'silent' }) });
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState(CONFIG.SESSION_DIR);
@@ -732,8 +753,6 @@ async function startBot() {
         browser: ['Duel Lucky MafiaPS', 'Chrome', '1.0.0']
     });
     
-    store.bind(sock.ev);
-    
     sock.ev.on('creds.update', saveCreds);
     
     sock.ev.on('connection.update', (update) => {
@@ -741,14 +760,13 @@ async function startBot() {
         
         if (qr) {
             console.log('📱 Scan QR Code berikut dengan WhatsApp:');
-            console.log(qr);
+            qrcode.generate(qr, { small: true });
         }
         
         if (connection === 'open') {
             console.log('✅ Bot Connected Successfully!');
             console.log(`🤖 ${CONFIG.BOT_NAME} is running...`);
             
-            // Get bot number
             if (sock.user) {
                 CONFIG.BOT_NUMBER = sock.user.id;
                 console.log(`📱 Bot Number: ${CONFIG.BOT_NUMBER}`);
@@ -785,7 +803,6 @@ async function startBot() {
         
         console.log(`[${getTimeNow()}] Command: ${command} from ${senderNumber}`);
         
-        // Simple command handling
         let response = '';
         
         // MENU
@@ -805,8 +822,10 @@ async function startBot() {
 ├─ 🏆 Menang: ${user.stats.wins}
 ├─ 💔 Kalah: ${user.stats.losses}
 ├─ 🎲 Streak: ${user.stats.streak}
-├─ 💰 Total Bet: ${formatMoney(user.stats.totalBet)}
-├─ 🎁 Total Win: ${formatMoney(user.stats.totalWin)}
+├─ 💰 Total Bet BGL: ${formatMoney(user.stats.totalBetBGL)}
+├─ 💰 Total Bet MGL: ${formatMoney(user.stats.totalBetMGL)}
+├─ 🎁 Total Win BGL: ${formatMoney(user.stats.totalWinBGL)}
+├─ 🎁 Total Win MGL: ${formatMoney(user.stats.totalWinMGL)}
 │
 ╰────────────────────────`;
         }
@@ -828,275 +847,82 @@ async function startBot() {
         
         else if (command === 'top') {
             const users = Object.entries(db.users)
-                .sort((a, b) => b[1].stats.totalWin - a[1].stats.totalWin)
+                .sort((a, b) => (b[1].stats.totalWinBGL + b[1].stats.totalWinMGL) - (a[1].stats.totalWinBGL + a[1].stats.totalWinMGL))
                 .slice(0, 10);
             
             let leaderboard = '╭───〔 *🏆 LEADERBOARD* 〕\n│\n';
             users.forEach(([id, data], index) => {
                 leaderboard += `├─ ${index + 1}. @${id.split('@')[0]}\n`;
-                leaderboard += `│   💰 ${formatMoney(data.stats.totalWin)} BGL\n`;
+                leaderboard += `│   💰 Total Win: ${formatMoney(data.stats.totalWinBGL)} BGL | ${formatMoney(data.stats.totalWinMGL)} MGL\n`;
             });
             leaderboard += '╰────────────────────────';
             response = leaderboard;
         }
         
-        // GAMES
-        else if (command === 'reme' && params.length >= 2) {
-            const bet = parseInt(params[0]);
+        // GAMES - Support BGL & MGL
+        else if (['reme', 'leme', 'qeme', 'lewa', 'csn', 'qq', 'rps', 'dadu', 'kb', 'coin', 'lmh', 'neme'].includes(command) && params.length >= 2) {
+            const betString = params[0];
             const choice = params[1];
+            const parsedBet = parseBet(betString);
             
-            if (isNaN(bet) || bet < CONFIG.MIN_BET || bet > CONFIG.MAX_BET) {
-                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)}`;
-            } else if (!checkBalance(senderNumber, 'bgl', bet)) {
-                response = `❌ Saldo BGL tidak mencukupi!`;
+            if (!parsedBet) {
+                response = `❌ Format taruhan salah!\n📝 Gunakan format: <jumlah>bgl atau <jumlah>mgl\n📝 Contoh: 1000bgl atau 500mgl`;
+            } else if (parsedBet.amount < CONFIG.MIN_BET || parsedBet.amount > CONFIG.MAX_BET) {
+                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)} ${parsedBet.currency.toUpperCase()}`;
+            } else if (!checkBalance(senderNumber, parsedBet.currency, parsedBet.amount)) {
+                response = `❌ Saldo ${parsedBet.currency.toUpperCase()} tidak mencukupi!`;
             } else {
-                deductBalance(senderNumber, 'bgl', bet);
-                const result = gameReme(bet, choice);
+                deductBalance(senderNumber, parsedBet.currency, parsedBet.amount);
+                let result;
+                
+                switch (command) {
+                    case 'reme':
+                        result = gameReme(parsedBet.amount, choice);
+                        break;
+                    case 'leme':
+                        result = gameLeme(parsedBet.amount, choice);
+                        break;
+                    case 'qeme':
+                        result = gameQeme(parsedBet.amount, choice);
+                        break;
+                    case 'lewa':
+                        result = gameLewa(parsedBet.amount, choice);
+                        break;
+                    case 'csn':
+                        result = gameCsn(parsedBet.amount, choice);
+                        break;
+                    case 'qq':
+                        result = gameQq(parsedBet.amount, choice);
+                        break;
+                    case 'rps':
+                        result = gameRps(parsedBet.amount, choice);
+                        break;
+                    case 'dadu':
+                        result = gameDadu(parsedBet.amount, choice);
+                        break;
+                    case 'kb':
+                        result = gameKb(parsedBet.amount, choice);
+                        break;
+                    case 'coin':
+                        result = gameCoin(parsedBet.amount, choice);
+                        break;
+                    case 'lmh':
+                        result = gameLmh(parsedBet.amount, choice);
+                        break;
+                    case 'neme':
+                        result = gameNeme(parsedBet.amount);
+                        break;
+                }
+                
                 if (result) {
                     if (result.isWin) {
-                        addBalance(senderNumber, 'bgl', result.winAmount);
+                        addBalance(senderNumber, parsedBet.currency, result.winAmount);
                     }
-                    response = result.message;
+                    response = `🎮 *GAME ${command.toUpperCase()}*\n━━━━━━━━━━━━━━\n💰 Taruhan: ${formatBetDisplay(parsedBet.amount, parsedBet.currency)}\n${result.message}\n━━━━━━━━━━━━━━\n💎 Sisa Saldo ${parsedBet.currency.toUpperCase()}: ${formatMoney(getUser(senderNumber).balance[parsedBet.currency])}`;
                 } else {
-                    addBalance(senderNumber, 'bgl', bet);
-                    response = `❌ Pilihan tidak valid! Gunakan: b1, b3, b5, b7`;
+                    addBalance(senderNumber, parsedBet.currency, parsedBet.amount);
+                    response = `❌ Pilihan tidak valid untuk game ${command.toUpperCase()}!`;
                 }
-            }
-        }
-        
-        else if (command === 'leme' && params.length >= 2) {
-            const bet = parseInt(params[0]);
-            const choice = params[1];
-            
-            if (isNaN(bet) || bet < CONFIG.MIN_BET || bet > CONFIG.MAX_BET) {
-                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)}`;
-            } else if (!checkBalance(senderNumber, 'bgl', bet)) {
-                response = `❌ Saldo BGL tidak mencukupi!`;
-            } else {
-                deductBalance(senderNumber, 'bgl', bet);
-                const result = gameLeme(bet, choice);
-                if (result) {
-                    if (result.isWin) {
-                        addBalance(senderNumber, 'bgl', result.winAmount);
-                    }
-                    response = result.message;
-                } else {
-                    addBalance(senderNumber, 'bgl', bet);
-                    response = `❌ Pilihan tidak valid! Gunakan: b1, b3, b5, b7, b9`;
-                }
-            }
-        }
-        
-        else if (command === 'qeme' && params.length >= 2) {
-            const bet = parseInt(params[0]);
-            const choice = params[1];
-            
-            if (isNaN(bet) || bet < CONFIG.MIN_BET || bet > CONFIG.MAX_BET) {
-                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)}`;
-            } else if (!checkBalance(senderNumber, 'bgl', bet)) {
-                response = `❌ Saldo BGL tidak mencukupi!`;
-            } else {
-                deductBalance(senderNumber, 'bgl', bet);
-                const result = gameQeme(bet, choice);
-                if (result) {
-                    if (result.isWin) {
-                        addBalance(senderNumber, 'bgl', result.winAmount);
-                    }
-                    response = result.message;
-                } else {
-                    addBalance(senderNumber, 'bgl', bet);
-                    response = `❌ Pilihan tidak valid! Gunakan: b1, b3, b5, b7, b9`;
-                }
-            }
-        }
-        
-        else if (command === 'lewa' && params.length >= 2) {
-            const bet = parseInt(params[0]);
-            const choice = params[1];
-            
-            if (isNaN(bet) || bet < CONFIG.MIN_BET || bet > CONFIG.MAX_BET) {
-                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)}`;
-            } else if (!checkBalance(senderNumber, 'bgl', bet)) {
-                response = `❌ Saldo BGL tidak mencukupi!`;
-            } else {
-                deductBalance(senderNumber, 'bgl', bet);
-                const result = gameLewa(bet, choice);
-                if (result) {
-                    if (result.isWin) {
-                        addBalance(senderNumber, 'bgl', result.winAmount);
-                    }
-                    response = result.message;
-                } else {
-                    addBalance(senderNumber, 'bgl', bet);
-                    response = `❌ Pilihan tidak valid! Gunakan: b1, b3, b5, b7, b9`;
-                }
-            }
-        }
-        
-        else if (command === 'csn' && params.length >= 2) {
-            const bet = parseInt(params[0]);
-            const choice = params[1];
-            
-            if (isNaN(bet) || bet < CONFIG.MIN_BET || bet > CONFIG.MAX_BET) {
-                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)}`;
-            } else if (!checkBalance(senderNumber, 'bgl', bet)) {
-                response = `❌ Saldo BGL tidak mencukupi!`;
-            } else {
-                deductBalance(senderNumber, 'bgl', bet);
-                const result = gameCsn(bet, choice);
-                if (result) {
-                    if (result.isWin) {
-                        addBalance(senderNumber, 'bgl', result.winAmount);
-                    }
-                    response = result.message;
-                } else {
-                    addBalance(senderNumber, 'bgl', bet);
-                    response = `❌ Pilihan tidak valid! Gunakan: b1, b3, b5, b7`;
-                }
-            }
-        }
-        
-        else if (command === 'qq' && params.length >= 2) {
-            const bet = parseInt(params[0]);
-            const choice = params[1];
-            
-            if (isNaN(bet) || bet < CONFIG.MIN_BET || bet > CONFIG.MAX_BET) {
-                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)}`;
-            } else if (!checkBalance(senderNumber, 'bgl', bet)) {
-                response = `❌ Saldo BGL tidak mencukupi!`;
-            } else {
-                deductBalance(senderNumber, 'bgl', bet);
-                const result = gameQq(bet, choice);
-                if (result) {
-                    if (result.isWin) {
-                        addBalance(senderNumber, 'bgl', result.winAmount);
-                    }
-                    response = result.message;
-                } else {
-                    addBalance(senderNumber, 'bgl', bet);
-                    response = `❌ Pilihan tidak valid! Gunakan: b1, b3, b5, b7`;
-                }
-            }
-        }
-        
-        else if (command === 'rps' && params.length >= 2) {
-            const bet = parseInt(params[0]);
-            const choice = params[1];
-            const validChoices = ['batu', 'kertas', 'gunting'];
-            
-            if (isNaN(bet) || bet < CONFIG.MIN_BET || bet > CONFIG.MAX_BET) {
-                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)}`;
-            } else if (!validChoices.includes(choice)) {
-                response = `❌ Pilihan tidak valid! Gunakan: batu, kertas, gunting`;
-            } else if (!checkBalance(senderNumber, 'bgl', bet)) {
-                response = `❌ Saldo BGL tidak mencukupi!`;
-            } else {
-                deductBalance(senderNumber, 'bgl', bet);
-                const result = gameRps(bet, choice);
-                if (result.isWin) {
-                    addBalance(senderNumber, 'bgl', result.winAmount);
-                }
-                response = result.message;
-            }
-        }
-        
-        else if (command === 'dadu' && params.length >= 2) {
-            const bet = parseInt(params[0]);
-            const choice = params[1];
-            
-            if (isNaN(bet) || bet < CONFIG.MIN_BET || bet > CONFIG.MAX_BET) {
-                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)}`;
-            } else if (!checkBalance(senderNumber, 'bgl', bet)) {
-                response = `❌ Saldo BGL tidak mencukupi!`;
-            } else {
-                deductBalance(senderNumber, 'bgl', bet);
-                const result = gameDadu(bet, choice);
-                if (result) {
-                    if (result.isWin) {
-                        addBalance(senderNumber, 'bgl', result.winAmount);
-                    }
-                    response = result.message;
-                } else {
-                    addBalance(senderNumber, 'bgl', bet);
-                    response = `❌ Pilihan tidak valid! Gunakan: b1, b3, b5, b7`;
-                }
-            }
-        }
-        
-        else if (command === 'kb' && params.length >= 2) {
-            const bet = parseInt(params[0]);
-            const choice = params[1];
-            
-            if (isNaN(bet) || bet < CONFIG.MIN_BET || bet > CONFIG.MAX_BET) {
-                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)}`;
-            } else if (!['kecil', 'besar'].includes(choice)) {
-                response = `❌ Pilihan tidak valid! Gunakan: kecil atau besar`;
-            } else if (!checkBalance(senderNumber, 'bgl', bet)) {
-                response = `❌ Saldo BGL tidak mencukupi!`;
-            } else {
-                deductBalance(senderNumber, 'bgl', bet);
-                const result = gameKb(bet, choice);
-                if (result.isWin) {
-                    addBalance(senderNumber, 'bgl', result.winAmount);
-                }
-                response = result.message;
-            }
-        }
-        
-        else if (command === 'coin' && params.length >= 2) {
-            const bet = parseInt(params[0]);
-            const choice = params[1];
-            
-            if (isNaN(bet) || bet < CONFIG.MIN_BET || bet > CONFIG.MAX_BET) {
-                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)}`;
-            } else if (!['head', 'tail'].includes(choice)) {
-                response = `❌ Pilihan tidak valid! Gunakan: head atau tail`;
-            } else if (!checkBalance(senderNumber, 'bgl', bet)) {
-                response = `❌ Saldo BGL tidak mencukupi!`;
-            } else {
-                deductBalance(senderNumber, 'bgl', bet);
-                const result = gameCoin(bet, choice);
-                if (result.isWin) {
-                    addBalance(senderNumber, 'bgl', result.winAmount);
-                }
-                response = result.message;
-            }
-        }
-        
-        else if (command === 'lmh' && params.length >= 2) {
-            const bet = parseInt(params[0]);
-            const choice = params[1];
-            
-            if (isNaN(bet) || bet < CONFIG.MIN_BET || bet > CONFIG.MAX_BET) {
-                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)}`;
-            } else if (!['low', 'mid', 'high'].includes(choice)) {
-                response = `❌ Pilihan tidak valid! Gunakan: low, mid, high`;
-            } else if (!checkBalance(senderNumber, 'bgl', bet)) {
-                response = `❌ Saldo BGL tidak mencukupi!`;
-            } else {
-                deductBalance(senderNumber, 'bgl', bet);
-                const result = gameLmh(bet, choice);
-                if (result.isWin) {
-                    addBalance(senderNumber, 'bgl', result.winAmount);
-                }
-                response = result.message;
-            }
-        }
-        
-        else if (command === 'neme' && params.length >= 1) {
-            const bet = parseInt(params[0]);
-            
-            if (isNaN(bet) || bet < CONFIG.MIN_BET || bet > CONFIG.MAX_BET) {
-                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)}`;
-            } else if (!checkBalance(senderNumber, 'bgl', bet)) {
-                response = `❌ Saldo BGL tidak mencukupi!`;
-            } else {
-                deductBalance(senderNumber, 'bgl', bet);
-                const result = gameNeme(bet);
-                if (result.isWin) {
-                    addBalance(senderNumber, 'bgl', result.winAmount);
-                }
-                response = result.message;
             }
         }
         
@@ -1105,17 +931,23 @@ async function startBot() {
             response = getDepositInfo();
         }
         
-        else if (command === 'wd' && params.length >= 1) {
+        else if (command === 'wd' && params.length >= 2) {
             const amount = parseInt(params[0]);
-            const result = createWithdrawTicket(senderNumber, 'bgl', amount);
-            response = result.message;
+            const currency = params[1];
+            
+            if (currency !== 'bgl' && currency !== 'mgl') {
+                response = `❌ Currency hanya bgl atau mgl!`;
+            } else {
+                const result = createWithdrawTicket(senderNumber, currency, amount);
+                response = result.message;
+            }
         }
         
         // TRANSFER
-        else if (command === 'tf' && params.length >= 2) {
+        else if (command === 'tf' && params.length >= 1) {
             const mention = params[0];
-            const amount = parseInt(params[1]);
-            const currency = params[2] || 'bgl';
+            const betString = params[1];
+            const parsedBet = parseBet(betString);
             
             let targetId = '';
             if (msg.message.extendedTextMessage?.contextInfo?.mentionedJid) {
@@ -1123,24 +955,27 @@ async function startBot() {
             }
             
             if (!targetId) {
-                response = `❌ Tag user yang ingin ditransfer!\nContoh: *${CONFIG.PREFIX}tf @user 1000 bgl*`;
-            } else if (isNaN(amount) || amount <= 0) {
+                response = `❌ Tag user yang ingin ditransfer!\nContoh: *${CONFIG.PREFIX}tf @user 1000bgl*`;
+            } else if (!parsedBet) {
+                response = `❌ Format taruhan salah!\n📝 Gunakan format: <jumlah>bgl atau <jumlah>mgl\n📝 Contoh: 1000bgl atau 500mgl`;
+            } else if (parsedBet.amount <= 0) {
                 response = `❌ Jumlah tidak valid!`;
-            } else if (!checkBalance(senderNumber, currency, amount)) {
-                response = `❌ Saldo ${currency.toUpperCase()} tidak mencukupi!`;
+            } else if (!checkBalance(senderNumber, parsedBet.currency, parsedBet.amount)) {
+                response = `❌ Saldo ${parsedBet.currency.toUpperCase()} tidak mencukupi!`;
             } else if (targetId === senderNumber) {
                 response = `❌ Tidak bisa transfer ke diri sendiri!`;
             } else {
-                transferBalance(senderNumber, targetId, currency, amount);
-                response = `✅ Transfer ${formatMoney(amount)} ${currency.toUpperCase()} berhasil dikirim ke @${targetId.split('@')[0]}`;
+                transferBalance(senderNumber, targetId, parsedBet.currency, parsedBet.amount);
+                response = `✅ Transfer ${formatBetDisplay(parsedBet.amount, parsedBet.currency)} berhasil dikirim ke @${targetId.split('@')[0]}`;
             }
         }
         
         // DUEL
-        else if (command === 'duel' && params.length >= 2) {
+        else if (command === 'duel' && params.length >= 3) {
             const target = params[0];
             const gameType = params[1];
-            const bet = parseInt(params[2]);
+            const betString = params[2];
+            const parsedBet = parseBet(betString);
             
             let targetId = '';
             if (msg.message.extendedTextMessage?.contextInfo?.mentionedJid) {
@@ -1148,18 +983,20 @@ async function startBot() {
             }
             
             if (!targetId) {
-                response = `❌ Tag lawan duel!\nContoh: *${CONFIG.PREFIX}duel @user reme 1000*`;
+                response = `❌ Tag lawan duel!\nContoh: *${CONFIG.PREFIX}duel @user reme 1000bgl*`;
             } else if (targetId === senderNumber) {
                 response = `❌ Tidak bisa duel dengan diri sendiri!`;
             } else if (!['reme', 'leme', 'qeme', 'lewa'].includes(gameType)) {
                 response = `❌ Game tidak valid! Pilihan: reme, leme, qeme, lewa`;
-            } else if (isNaN(bet) || bet < CONFIG.MIN_BET || bet > CONFIG.MAX_BET) {
-                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)}`;
-            } else if (!checkBalance(senderNumber, 'bgl', bet)) {
-                response = `❌ Saldo BGL tidak mencukupi!`;
+            } else if (!parsedBet) {
+                response = `❌ Format taruhan salah!\n📝 Gunakan format: <jumlah>bgl atau <jumlah>mgl\n📝 Contoh: 1000bgl atau 500mgl`;
+            } else if (parsedBet.amount < CONFIG.MIN_BET || parsedBet.amount > CONFIG.MAX_BET) {
+                response = `❌ Taruhan harus antara ${formatMoney(CONFIG.MIN_BET)} - ${formatMoney(CONFIG.MAX_BET)} ${parsedBet.currency.toUpperCase()}`;
+            } else if (!checkBalance(senderNumber, parsedBet.currency, parsedBet.amount)) {
+                response = `❌ Saldo ${parsedBet.currency.toUpperCase()} tidak mencukupi!`;
             } else {
-                const duelId = createDuel(senderNumber, targetId, 'bgl', bet, gameType);
-                response = `⚔️ *DUEL CHALLENGE*\n━━━━━━━━━━━━━━\n👤 ${senderNumber.split('@')[0]} menantang @${targetId.split('@')[0]} duel *${gameType.toUpperCase()}*\n💰 Taruhan: ${formatMoney(bet)} BGL\n━━━━━━━━━━━━━━\nKetik *${CONFIG.PREFIX}accept* untuk menerima\nKetik *${CONFIG.PREFIX}reject* untuk menolak\n⏳ Duel akan kadaluarsa dalam 2 menit!`;
+                const duelId = createDuel(senderNumber, targetId, parsedBet.currency, parsedBet.amount, gameType);
+                response = `⚔️ *DUEL CHALLENGE*\n━━━━━━━━━━━━━━\n👤 ${senderNumber.split('@')[0]} menantang @${targetId.split('@')[0]} duel *${gameType.toUpperCase()}*\n💰 Taruhan: ${formatBetDisplay(parsedBet.amount, parsedBet.currency)}\n━━━━━━━━━━━━━━\nKetik *${CONFIG.PREFIX}accept* untuk menerima\nKetik *${CONFIG.PREFIX}reject* untuk menolak\n⏳ Duel akan kadaluarsa dalam 2 menit!`;
             }
         }
         
@@ -1223,6 +1060,10 @@ async function startBot() {
         
         else if (command === 'how') {
             response = `╭───〔 *📖 CARA BERMAIN* 〕
+│
+├─ *FORMAT TARUHAN:*
+│  • Gunakan format: <jumlah>bgl atau <jumlah>mgl
+│  • Contoh: 1000bgl, 500mgl, 1bgl, 5mgl
 │
 ├─ *REME*: Tebak angka belakang 1-7
 ├─ *LEME*: Tebak angka keberuntungan 1-9
