@@ -1,4 +1,4 @@
-// DUEL RXV TEAMRXVVX - WHATSAPP BOT (FIXED VERSION)
+// DUEL RXV TEAMRXVVX - WHATSAPP BOT (FINAL FIXED)
 // Simpan sebagai index.js
 
 // ==================== CRYPTO POLYFILL ====================
@@ -79,33 +79,104 @@ let db = {
 const DB_PATH = '/data/database.json';
 const LOCAL_DB_PATH = './database.json';
 
-function loadDatabase() {
+// ==================== DATABASE FUNCTIONS WITH ERROR HANDLING ====================
+function ensureDataDirectory() {
     try {
-        if (fs.existsSync(DB_PATH)) {
-            db = JSON.parse(fs.readFileSync(DB_PATH));
-            console.log('✅ Database loaded from persistent storage');
-        } else if (fs.existsSync(LOCAL_DB_PATH)) {
-            db = JSON.parse(fs.readFileSync(LOCAL_DB_PATH));
-            fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
-            console.log('✅ Database loaded from local');
-        } else {
-            db.roles.owners = [config.botNumber];
-            fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
-            fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(db, null, 2));
-            console.log('✅ Database created');
+        // Buat direktori /data jika belum ada
+        if (!fs.existsSync('/data')) {
+            fs.mkdirSync('/data', { recursive: true });
+            console.log('✅ Created /data directory');
         }
     } catch (err) {
-        console.log('Database error:', err);
+        console.log('Cannot create /data, using local storage');
+    }
+}
+
+function loadDatabase() {
+    ensureDataDirectory();
+    
+    try {
+        // Coba baca dari persistent volume dulu
+        if (fs.existsSync(DB_PATH)) {
+            const rawData = fs.readFileSync(DB_PATH);
+            db = JSON.parse(rawData);
+            console.log('✅ Database loaded from persistent storage');
+            return true;
+        } 
+        // Coba baca dari local
+        else if (fs.existsSync(LOCAL_DB_PATH)) {
+            const rawData = fs.readFileSync(LOCAL_DB_PATH);
+            db = JSON.parse(rawData);
+            console.log('✅ Database loaded from local');
+            // Copy ke persistent jika bisa
+            try {
+                fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+            } catch (err) {}
+            return true;
+        } 
+        // Buat database baru
+        else {
+            db.roles.owners = [config.botNumber];
+            db.roles.sellers = [];
+            db.roles.banned = [];
+            
+            // Simpan ke kedua lokasi
+            try {
+                fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(db, null, 2));
+                console.log('✅ Database created locally');
+            } catch (err) {
+                console.log('Error creating local database:', err.message);
+            }
+            
+            try {
+                fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+                console.log('✅ Database created in persistent storage');
+            } catch (err) {
+                console.log('Cannot write to persistent storage:', err.message);
+            }
+            
+            return true;
+        }
+    } catch (err) {
+        console.log('Database error:', err.message);
+        
+        // Fallback: gunakan memory-only database
+        console.log('⚠️ Using memory-only database (data will be lost on restart)');
+        db = { 
+            users: {}, 
+            games: [],
+            feeWallet: 0,
+            feeHistory: [],
+            giftCodes: [],
+            jackpotPool: 10000,
+            lastJackpotWinner: null,
+            jackpotHistory: [],
+            roles: { owners: [config.botNumber], sellers: [], banned: [] },
+            sellerSettings: { commission: 10, minTopup: 10000, maxTopup: 1000000, coinRate: 1000 },
+            pendingDeposits: [],
+            transactionHistory: []
+        };
+        return false;
     }
 }
 
 function saveDB() {
     try {
-        fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+        // Simpan ke local
         fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(db, null, 2));
-    } catch (err) {}
+        
+        // Coba simpan ke persistent
+        try {
+            fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+        } catch (err) {
+            // Persistent storage not available, ignore
+        }
+    } catch (err) {
+        console.log('Save DB error:', err.message);
+    }
 }
 
+// Load database
 loadDatabase();
 
 // ==================== HELPER FUNCTIONS ====================
@@ -277,7 +348,7 @@ const activeGames = new Map();
 const activePVH = new Map();
 
 async function startBot() {
-    console.log('🎮 DUEL RXV TEAMRXVVX WhatsApp Bot starting...');
+    console.log('\n🎮 DUEL RXV TEAMRXVVX WhatsApp Bot starting...');
     console.log(`📱 Bot Number: ${config.botNumber}`);
     console.log(`👑 Owner: ${db.roles.owners.join(', ')}`);
     console.log(`🛒 Seller: ${db.roles.sellers.length} seller`);
@@ -286,9 +357,15 @@ async function startBot() {
     const authDir = '/data/auth_info';
     const localAuthDir = './auth_info';
     
-    if (!fs.existsSync('/data')) fs.mkdirSync('/data', { recursive: true });
-    if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
-    if (!fs.existsSync(localAuthDir)) fs.mkdirSync(localAuthDir, { recursive: true });
+    // Buat direktori jika belum ada
+    try {
+        if (!fs.existsSync('/data')) fs.mkdirSync('/data', { recursive: true });
+        if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
+        if (!fs.existsSync(localAuthDir)) fs.mkdirSync(localAuthDir, { recursive: true });
+        console.log('✅ Directories created');
+    } catch (err) {
+        console.log('Directory creation error:', err.message);
+    }
     
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     
@@ -347,7 +424,8 @@ async function startBot() {
     console.log(`🔐 Meminta kode pairing untuk ${phoneNumber}...`);
     
     let retryCount = 0;
-    const maxRetries = 3;
+    const maxRetries = 5;
+    let paired = false;
     
     const getPairingCode = async () => {
         try {
@@ -359,6 +437,7 @@ async function startBot() {
             console.log('3. Tap "Tautkan Perangkat"');
             console.log(`4. Masukkan kode: ${code}`);
             console.log('\n⏳ Menunggu koneksi...\n');
+            paired = true;
             return true;
         } catch (err) {
             console.error(`❌ Gagal mendapatkan kode pairing (attempt ${retryCount + 1}/${maxRetries}):`, err.message);
@@ -369,13 +448,15 @@ async function startBot() {
                 await new Promise(r => setTimeout(r, 5000));
                 return getPairingCode();
             } else {
-                console.log('\n❌ Gagal mendapatkan kode pairing setelah 3 kali percobaan!');
+                console.log('\n❌ Gagal mendapatkan kode pairing setelah 5 kali percobaan!');
                 console.log('📱 Pastikan:');
                 console.log('1. Nomor WhatsApp benar: ' + phoneNumber);
-                console.log('2. Nomor tersebut aktif');
+                console.log('2. Nomor tersebut aktif dan terdaftar di WhatsApp');
                 console.log('3. Koneksi internet stabil');
-                console.log('\n🔄 Restarting bot...');
-                setTimeout(() => process.exit(0), 3000);
+                console.log('4. WhatsApp tidak diblokir');
+                console.log('\n🔄 Restarting bot in 10 seconds...');
+                await new Promise(r => setTimeout(r, 10000));
+                process.exit(0);
                 return false;
             }
         }
@@ -441,16 +522,16 @@ async function startBot() {
                 await sock.sendMessage(from, { text: 
                     `📚 *PANDUAN GAME*\n\n` +
                     `🎰 *JUDOL HOKI-HOKIAN:*\n` +
-                    `• .slot 1000 - Slot Machine\n` +
-                    `• .dadu 1000 - Dadu Hoki\n` +
-                    `• .kartu 1000 - Kartu Hoki\n\n` +
+                    `• .slot 1000 - Slot Machine (Jackpot 200x)\n` +
+                    `• .dadu 1000 - Dadu Hoki (Jackpot 150x)\n` +
+                    `• .kartu 1000 - Kartu Hoki (Jackpot 200x)\n\n` +
                     
                     `💎 *JACKPOT:*\n` +
                     `• 10% taruhan masuk jackpot\n` +
-                    `• Chance dapat jackpot saat menang besar\n\n` +
+                    `• Chance 1% dapat jackpot saat menang besar\n\n` +
                     
                     `💰 *DEPOSIT:* ${config.deposit.dana}\n` +
-                    `💎 Rate: 10.000 = 1000 coin`
+                    `💎 Rate: Rp 10.000 = 1000 coin`
                 });
             }
             
@@ -736,8 +817,8 @@ async function startBot() {
 // ==================== START ====================
 startBot().catch(err => {
     console.error('Fatal error:', err);
-    setTimeout(() => process.exit(0), 3000);
+    console.log('🔄 Restarting in 10 seconds...');
+    setTimeout(() => process.exit(0), 10000);
 });
 
 console.log('🎮 DUEL RXV TEAMRXVVX WhatsApp Bot starting...');
-console.log('📱 Bot akan menggunakan pairing code\n');
